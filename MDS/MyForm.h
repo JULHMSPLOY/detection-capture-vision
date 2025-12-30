@@ -1,51 +1,44 @@
 #pragma once
+
 #include <opencv2/opencv.hpp>
-#include <msclr/marshal_cppstd.h>
+#include <opencv2/imgcodecs.hpp>
+#include <opencv2/imgproc.hpp>
+#include <opencv2/videoio.hpp>
+#include <algorithm> // สำหรับ std::max, std::min
+
+using namespace cv;
 
 namespace MDS {
 
 	using namespace System;
+	using namespace System::Runtime::InteropServices;
 	using namespace System::ComponentModel;
 	using namespace System::Collections;
 	using namespace System::Windows::Forms;
 	using namespace System::Data;
 	using namespace System::Drawing;
-	using namespace cv;
 
-	/// <summary>
-	/// Summary for MyForm
-	/// </summary>
 	public ref class MyForm : public System::Windows::Forms::Form
 	{
 	public:
 		MyForm(void)
 		{
 			InitializeComponent();
+			image = new cv::Mat();
 			lastFrame = new cv::Mat();
-			currentFrame = new cv::Mat();
-			roi = System::Drawing::Rectangle(10, 10, 100, 100);
+			roi = System::Drawing::Rectangle(50, 50, 100, 100);
 		}
 
 	protected:
-		/// <summary>
-		/// Clean up any resources being used.
-		/// </summary>
 		~MyForm()
 		{
-			if (components)
-			{
-				delete components;
-			}
-			if (capture) { 
-				capture->release(); 
+			if (capture != nullptr) {
+				capture->release();
 				delete capture;
 			}
-			if (lastFrame) {
-				delete lastFrame;
-			}
-			if (currentFrame) {
-				delete currentFrame;
-			}
+			if (image) delete image;
+			if (lastFrame) delete lastFrame;
+			if (components) delete components;
 		}
 	private: System::Windows::Forms::PictureBox^ picMonitor;
 	private: System::Windows::Forms::Timer^ timer;
@@ -53,7 +46,7 @@ namespace MDS {
 
 
 
-	private: System::Windows::Forms::Button^ btnStart;
+
 	private: System::Windows::Forms::Button^ btnStop;
 
 
@@ -76,16 +69,15 @@ namespace MDS {
 			this->components = (gcnew System::ComponentModel::Container());
 			this->picMonitor = (gcnew System::Windows::Forms::PictureBox());
 			this->timer = (gcnew System::Windows::Forms::Timer(this->components));
-			this->btnStart = (gcnew System::Windows::Forms::Button());
 			this->btnStop = (gcnew System::Windows::Forms::Button());
 			(cli::safe_cast<System::ComponentModel::ISupportInitialize^>(this->picMonitor))->BeginInit();
 			this->SuspendLayout();
 			// 
 			// picMonitor
 			// 
-			this->picMonitor->Location = System::Drawing::Point(26, 24);
+			this->picMonitor->Location = System::Drawing::Point(12, 12);
 			this->picMonitor->Name = L"picMonitor";
-			this->picMonitor->Size = System::Drawing::Size(446, 243);
+			this->picMonitor->Size = System::Drawing::Size(476, 292);
 			this->picMonitor->SizeMode = System::Windows::Forms::PictureBoxSizeMode::StretchImage;
 			this->picMonitor->TabIndex = 0;
 			this->picMonitor->TabStop = false;
@@ -99,19 +91,9 @@ namespace MDS {
 			this->timer->Interval = 33;
 			this->timer->Tick += gcnew System::EventHandler(this, &MyForm::timer_Tick);
 			// 
-			// btnStart
-			// 
-			this->btnStart->Location = System::Drawing::Point(55, 296);
-			this->btnStart->Name = L"btnStart";
-			this->btnStart->Size = System::Drawing::Size(75, 23);
-			this->btnStart->TabIndex = 1;
-			this->btnStart->Text = L"Start";
-			this->btnStart->UseVisualStyleBackColor = true;
-			this->btnStart->Click += gcnew System::EventHandler(this, &MyForm::btnStart_Click);
-			// 
 			// btnStop
 			// 
-			this->btnStop->Location = System::Drawing::Point(370, 296);
+			this->btnStop->Location = System::Drawing::Point(211, 310);
 			this->btnStop->Name = L"btnStop";
 			this->btnStop->Size = System::Drawing::Size(75, 23);
 			this->btnStop->TabIndex = 2;
@@ -125,7 +107,6 @@ namespace MDS {
 			this->AutoScaleMode = System::Windows::Forms::AutoScaleMode::Font;
 			this->ClientSize = System::Drawing::Size(500, 345);
 			this->Controls->Add(this->btnStop);
-			this->Controls->Add(this->btnStart);
 			this->Controls->Add(this->picMonitor);
 			this->Name = L"MyForm";
 			this->Text = L"MyForm";
@@ -134,92 +115,106 @@ namespace MDS {
 			this->ResumeLayout(false);
 
 		}
+
 #pragma endregion
 	private:
-		// ประกาศตัวแปร (Variables)
-		cv::VideoCapture* capture;
+		cv::Mat* image;
 		cv::Mat* lastFrame;
-		cv::Mat* currentFrame;
+		cv::VideoCapture* capture;
 		System::Drawing::Rectangle roi;
-		bool isSelecting = false;
+		bool isDragging = false;
 		System::Drawing::Point startPoint;
 
-		// ฟังก์ชันแปลง Mat เป็น Bitmap
-		System::Drawing::Bitmap^ MatToBitmap(cv::Mat& img) {
-			if (img.empty()) return nullptr;
-			return gcnew System::Drawing::Bitmap(img.cols, img.rows, (int)img.step,
-				System::Drawing::Imaging::PixelFormat::Format24bppRgb, (System::IntPtr)img.data);
+		// ฟังก์ชันแปลง Mat เป็น Bitmap (แบบ Copy ข้อมูลเพื่อความเสถียร)
+		Bitmap^ ConvertToBitmap(Mat* img) {
+			if (img == nullptr || img->empty()) return nullptr;
+			Bitmap^ bmp = gcnew Bitmap(img->cols, img->rows, System::Drawing::Imaging::PixelFormat::Format24bppRgb);
+			System::Drawing::Imaging::BitmapData^ bmpData = bmp->LockBits(
+				System::Drawing::Rectangle(0, 0, bmp->Width, bmp->Height),
+				System::Drawing::Imaging::ImageLockMode::WriteOnly, bmp->PixelFormat);
+
+			cv::Mat matbmp(img->rows, img->cols, CV_8UC3, bmpData->Scan0.ToPointer(), bmpData->Stride);
+			img->copyTo(matbmp);
+
+			bmp->UnlockBits(bmpData);
+			return bmp;
 		}
-	private: System::Void MyForm_Load(System::Object^ sender, System::EventArgs^ e) {}
-	private: System::Void btnStart_Click(System::Object^ sender, System::EventArgs^ e) 
+
+	private: System::Void MyForm_Load(System::Object^ sender, System::EventArgs^ e) 
 	{
-		capture->open(0);
-		if (capture->isOpened()) {
+		capture = new cv::VideoCapture(0);
+		if (capture->isOpened())
+		{
 			timer->Start();
 		}
 		else {
-			MessageBox::Show("Camera not found!");
+			MessageBox::Show("Camera Error!");
 		}
 	}
-	private: System::Void btnStop_Click(System::Object^ sender, System::EventArgs^ e) 
-	{
-		timer->Stop();
-		capture->release();
-	}
-	private: System::Void timer_Tick(System::Object^ sender, System::EventArgs^ e) 
-	{
-		if (!capture->isOpened()) return;
-		capture->read(*currentFrame);
-		if (currentFrame->empty()) return;
 
-		// Process Motion Detection inside ROI
-		cv::Rect cvRoi(roi.X, roi.Y, roi.Width, roi.Height);
+	private: System::Void timer_Tick(System::Object^ sender, System::EventArgs^ e)
+	{
+		if (capture == nullptr || !capture->isOpened()) return;
+		capture->read(*image);
+		if (image->empty()) return;
 
-		// Boundary check for ROI
-		cvRoi.x = (std::max)(0, (std::min)(cvRoi.x, currentFrame->cols - 1));
-		cvRoi.y = (std::max)(0, (std::min)(cvRoi.y, currentFrame->rows - 1));
-		cvRoi.width = (std::min)(cvRoi.width, currentFrame->cols - cvRoi.x);
-		cvRoi.height = (std::min)(cvRoi.height, currentFrame->rows - cvRoi.y);
+		float ratioX = (float)image->cols / picMonitor->Width;
+		float ratioY = (float)image->rows / picMonitor->Height;
+
+		cv::Rect cvRoi(
+			(int)(roi.X * ratioX), (int)(roi.Y * ratioY),
+			(int)(roi.Width * ratioX), (int)(roi.Height * ratioY)
+		);
+
+		cvRoi.x = (std::max)(0, (std::min)(cvRoi.x, image->cols - 1));
+		cvRoi.y = (std::max)(0, (std::min)(cvRoi.y, image->rows - 1));
+		cvRoi.width = (std::min)(cvRoi.width, image->cols - cvRoi.x);
+		cvRoi.height = (std::min)(cvRoi.height, image->rows - cvRoi.y);
 
 		if (cvRoi.width > 10 && cvRoi.height > 10) {
 			cv::Mat gray, blur, diff, thresh;
-			cv::cvtColor((*currentFrame)(cvRoi), gray, cv::COLOR_BGR2GRAY);
+			cv::cvtColor((*image)(cvRoi), gray, cv::COLOR_BGR2GRAY);
 			cv::GaussianBlur(gray, blur, cv::Size(21, 21), 0);
 
 			if (!lastFrame->empty() && lastFrame->size() == blur.size()) {
-				// Absolute Difference
 				cv::absdiff(*lastFrame, blur, diff);
-				// Threshold to binary
 				cv::threshold(diff, thresh, 25, 255, cv::THRESH_BINARY);
 
 				if (cv::countNonZero(thresh) > 500) {
-					// Motion detected: Draw RED rectangle
-					cv::rectangle(*currentFrame, cvRoi, cv::Scalar(0, 0, 255), 2);
-					cv::putText(*currentFrame, "MOTION DETECTED", cv::Point(roi.X, roi.Y - 10),
-						cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 255), 1);
+					cv::rectangle(*image, cvRoi, cv::Scalar(0, 0, 255), 2); // บุกรุก = แดง
+					cv::putText(*image, "INTRUDER!", cv::Point(cvRoi.x, cvRoi.y - 10),
+						cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(0, 0, 255), 2);
 				}
 				else {
-					// Normal state: Draw GREEN rectangle
-					cv::rectangle(*currentFrame, cvRoi, cv::Scalar(0, 255, 0), 1);
+					cv::rectangle(*image, cvRoi, cv::Scalar(0, 255, 0), 1); // ปกติ = เขียว
 				}
 			}
 			*lastFrame = blur.clone();
 		}
 
-		// Update PictureBox and prevent Memory Leak
+		cv::Mat display;
+		cv::cvtColor(*image, display, cv::COLOR_BGR2RGB);
 		if (picMonitor->Image != nullptr) delete picMonitor->Image;
-		picMonitor->Image = MatToBitmap(*currentFrame);
+		picMonitor->Image = ConvertToBitmap(&display);
 	}
+
+	private: System::Void btnStop_Click(System::Object^ sender, System::EventArgs^ e) 
+	{
+		timer->Stop();
+		if (capture->isOpened()) capture->release();
+		picMonitor->Image = nullptr;
+	}
+
 	private: System::Void picMonitor_MouseDown(System::Object^ sender, System::Windows::Forms::MouseEventArgs^ e) 
 	{
-		isSelecting = true;
+		isDragging = true;
 		startPoint = e->Location;
 		roi = System::Drawing::Rectangle(e->X, e->Y, 0, 0);
 	}
 
 	private: System::Void picMonitor_MouseMove(System::Object^ sender, System::Windows::Forms::MouseEventArgs^ e) 
 	{
-		if (isSelecting) {
+		if (isDragging) {
 			roi.X = Math::Min(startPoint.X, e->X);
 			roi.Y = Math::Min(startPoint.Y, e->Y);
 			roi.Width = Math::Abs(startPoint.X - e->X);
@@ -228,7 +223,7 @@ namespace MDS {
 	}
 	private: System::Void picMonitor_MouseUp(System::Object^ sender, System::Windows::Forms::MouseEventArgs^ e) 
 	{
-		isSelecting = false;
+		isDragging = false;
 	}
 
 	private: System::Void picMonitor_Click(System::Object^ sender, System::EventArgs^ e) {}
