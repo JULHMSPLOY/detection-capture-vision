@@ -49,8 +49,12 @@ namespace MDS {
 			if (lastFrame) delete lastFrame;
 			if (components) delete components;
 		}
+
 	private: System::Windows::Forms::PictureBox^ picMonitor;
 	private: System::Windows::Forms::Timer^ timer;
+	private: System::Windows::Forms::Button^ btnlog;
+	private: System::Windows::Forms::Label^ label1;
+
 	private: System::ComponentModel::IContainer^ components;
 
 #pragma region Windows Form Designer generated code
@@ -59,14 +63,16 @@ namespace MDS {
 			this->components = (gcnew System::ComponentModel::Container());
 			this->picMonitor = (gcnew System::Windows::Forms::PictureBox());
 			this->timer = (gcnew System::Windows::Forms::Timer(this->components));
+			this->btnlog = (gcnew System::Windows::Forms::Button());
+			this->label1 = (gcnew System::Windows::Forms::Label());
 			(cli::safe_cast<System::ComponentModel::ISupportInitialize^>(this->picMonitor))->BeginInit();
 			this->SuspendLayout();
 			// 
 			// picMonitor
 			// 
-			this->picMonitor->Location = System::Drawing::Point(12, 12);
+			this->picMonitor->Location = System::Drawing::Point(32, 53);
 			this->picMonitor->Name = L"picMonitor";
-			this->picMonitor->Size = System::Drawing::Size(476, 321);
+			this->picMonitor->Size = System::Drawing::Size(525, 332);
 			this->picMonitor->SizeMode = System::Windows::Forms::PictureBoxSizeMode::StretchImage;
 			this->picMonitor->TabIndex = 0;
 			this->picMonitor->TabStop = false;
@@ -80,28 +86,57 @@ namespace MDS {
 			this->timer->Interval = 33;
 			this->timer->Tick += gcnew System::EventHandler(this, &MyForm::timer_Tick);
 			// 
+			// btnlog
+			// 
+			this->btnlog->Location = System::Drawing::Point(259, 402);
+			this->btnlog->Name = L"btnlog";
+			this->btnlog->Size = System::Drawing::Size(64, 29);
+			this->btnlog->TabIndex = 1;
+			this->btnlog->Text = L"Log";
+			this->btnlog->UseVisualStyleBackColor = true;
+			this->btnlog->Click += gcnew System::EventHandler(this, &MyForm::btnlog_Click);
+			// 
+			// label1
+			// 
+			this->label1->AutoSize = true;
+			this->label1->Font = (gcnew System::Drawing::Font(L"Microsoft Sans Serif", 10.2F, System::Drawing::FontStyle::Bold, System::Drawing::GraphicsUnit::Point,
+				static_cast<System::Byte>(222)));
+			this->label1->Location = System::Drawing::Point(255, 18);
+			this->label1->Name = L"label1";
+			this->label1->Size = System::Drawing::Size(72, 20);
+			this->label1->TabIndex = 2;
+			this->label1->Text = L"Monitor";
+			// 
 			// MyForm
 			// 
 			this->AutoScaleDimensions = System::Drawing::SizeF(8, 16);
 			this->AutoScaleMode = System::Windows::Forms::AutoScaleMode::Font;
-			this->ClientSize = System::Drawing::Size(500, 345);
+			this->ClientSize = System::Drawing::Size(592, 443);
+			this->Controls->Add(this->label1);
+			this->Controls->Add(this->btnlog);
 			this->Controls->Add(this->picMonitor);
 			this->Name = L"MyForm";
 			this->Text = L"MyForm";
 			this->Load += gcnew System::EventHandler(this, &MyForm::MyForm_Load);
 			(cli::safe_cast<System::ComponentModel::ISupportInitialize^>(this->picMonitor))->EndInit();
 			this->ResumeLayout(false);
+			this->PerformLayout();
 
 		}
 
 #pragma endregion
 	private:
+
+		LogForm^ logWindow = nullptr;
+
 		cv::Mat* image;
 		cv::Mat* lastFrame;
 		cv::VideoCapture* capture;
 		System::Drawing::Rectangle roi;
 		bool isDragging = false;
 		System::Drawing::Point startPoint;
+
+		System::DateTime lastSaveTime = System::DateTime::MinValue;
 
 		Bitmap^ ConvertToBitmap(Mat* img) {
 			if (img == nullptr || img->empty()) return nullptr;
@@ -127,6 +162,32 @@ namespace MDS {
 		else {
 			MessageBox::Show("Camera Error!");
 		}
+	}
+
+	private: System::Void btnlog_Click(System::Object^ sender, System::EventArgs^ e) 
+	{
+		this->timer->Stop(); 
+
+		if (logWindow == nullptr || logWindow->IsDisposed) {
+			logWindow = gcnew LogForm(this);
+			logWindow->FormClosed += gcnew FormClosedEventHandler(this, &MyForm::OnLogReturn);
+		}
+
+		logWindow->Location = this->Location;
+		this->Hide();
+		logWindow->Show();
+	}
+
+	private: System::Void OnLogReturn(System::Object^ sender, FormClosedEventArgs^ e)
+	{
+		this->Show();         
+		this->timer->Start(); 
+	}
+		   
+	private: System::Void OnLogFormClosed(System::Object^ sender, FormClosedEventArgs^ e)
+	{
+		this->Show(); 
+		timer->Start();
 	}
 
 	private: System::Void timer_Tick(System::Object^ sender, System::EventArgs^ e)
@@ -158,17 +219,33 @@ namespace MDS {
 				cv::threshold(diff, thresh, 25, 255, cv::THRESH_BINARY);
 
 				if (cv::countNonZero(thresh) > 500) {
-					cv::rectangle(*image, cvRoi, cv::Scalar(0, 0, 255), 2); // บุกรุก = แดง
+					cv::rectangle(*image, cvRoi, cv::Scalar(0, 0, 255), 2); 
 					cv::putText(*image, "INTRUDER!", cv::Point(cvRoi.x, cvRoi.y - 10),
 						cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(0, 0, 255), 2);
 
-					System::DateTime now = System::DateTime::Now;
-					System::String^ fileName = "log_" + now.ToString("yyyyMMdd_HHmmss") + ".jpg";
-					std::string stdPath = msclr::interop::marshal_as<std::string>(fileName);
-					cv::imwrite(stdPath, *image);
+					if ((System::DateTime::Now - lastSaveTime).TotalSeconds > 2) {
+						System::String^ folderName = "Detected Images";
+						System::String^ folderPath = System::IO::Path::Combine(System::Windows::Forms::Application::StartupPath, folderName);
+
+						if (!System::IO::Directory::Exists(folderPath)) {
+							System::IO::Directory::CreateDirectory(folderPath);
+						}
+
+						System::DateTime now = System::DateTime::Now;
+						System::String^ fileName = "log_" + now.ToString("yyyyMMdd_HHmmss") + ".jpg";
+						System::String^ fullSavePath = System::IO::Path::Combine(folderPath, fileName);
+
+						msclr::interop::marshal_context context;
+						std::string stdPath = context.marshal_as<std::string>(fullSavePath);
+
+						cv::imwrite(stdPath, *image);
+						lastSaveTime = System::DateTime::Now;
+
+						}
+
 				}
 				else {
-					cv::rectangle(*image, cvRoi, cv::Scalar(0, 255, 0), 1); // ปกติ = เขียว
+					cv::rectangle(*image, cvRoi, cv::Scalar(0, 255, 0), 1); 
 				}
 			}
 			*lastFrame = blur.clone();
@@ -211,5 +288,6 @@ namespace MDS {
 	}
 
 	private: System::Void picMonitor_Click(System::Object^ sender, System::EventArgs^ e) {}
+
 };
 }
